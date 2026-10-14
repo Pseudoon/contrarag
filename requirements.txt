@@ -5,7 +5,11 @@ uvicorn==0.30.6
 python-dotenv
 qdrant-client==1.11.3
 groq==0.11.0
+httpx==0.27.2
+httpcore==1.0.5
 transformers==4.44.2
 sentence-transformers==3.1.1
+sentencepiece
+protobuf
 scikit-learn
 scipy
