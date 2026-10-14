@@ -1,0 +1,5 @@
+STATE OF CALIFORNIA - Senate Bill No. 942 (CALIFORNIA AI TRANSPARENCY ACT).
+        Section 1: Covered Providers and Threshold Metrics:
+        Applies to covered providers of generative artificial intelligence systems that sustain over 1,000,000 monthly active users or publicly accessible visitors within California. 
+        Section 2: Manifest and Latent Content Disclosure Requirements:
+        Covered providers must offer utility tools enabling users to include a clear, conspicuous visible 'manifest disclosure' indicating content is AI-created. Concurrently, an un-strippable, latent cryptographic disclosure signature must be permanently embedded into file metadata arrays (e.g., C2PA standard), tracking model identity and generation timestamps.

@@ -1,0 +1,12 @@
+﻿venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+node_modules/
+nexus-arena/node_modules/
+nexus-arena/dist/
+chroma_db/
+*.docx
+*.pdf

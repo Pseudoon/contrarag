@@ -1,0 +1,5 @@
+AUTHORITY REMIT: OFCOM STRATEGIC APPROACH TO AI ADOPTION (ONLINE SAFETY ACT REGULATION).
+        [Pillar 1] Statutory Remit over Algorithmic Moderation Engines:
+        Ofcom operates under a technology-neutral, outcomes-focused framework. Platforms deploying algorithmic recommendation engines and automated sorting loops must actively identify, mitigate, and record risks of illegal content dissemination. Interventions remain strictly evidence-based and proportionate.
+        [Pillar 2] Generative Synthetic Media, Watermarks, and Provenance:
+        To help keep consumers safe, proactive technologies such as "hash matching" are recommended to detect explicit synthetic deepfakes shared without explicit user consent. Service providers must empower users with tools to critically engage with generative outputs.
