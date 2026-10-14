@@ -40,13 +40,15 @@ qdrant = QdrantClient(
     api_key=os.getenv("QDRANT_API_KEY"),
     timeout=30
 )
-client_eu = Groq(api_key=os.getenv("GROQ_API_KEY_EU"))
-client_us = Groq(api_key=os.getenv("GROQ_API_KEY_US"))
-client_judge = Groq(api_key=os.getenv("GROQ_API_KEY_JUDGE"))
+
+# Dedicated Groq clients using all 4 keys from your .env file
+client_eu = Groq(api_key=os.getenv("GROQ_API_KEY_EU") or os.getenv("GROQ_API_KEY"))
+client_us = Groq(api_key=os.getenv("GROQ_API_KEY_US") or os.getenv("GROQ_API_KEY"))
+client_uk = Groq(api_key=os.getenv("GROQ_API_KEY") or os.getenv("GROQ_API_KEY_JUDGE"))
+client_judge = Groq(api_key=os.getenv("GROQ_API_KEY_JUDGE") or os.getenv("GROQ_API_KEY"))
 print("All models loaded")
 
-# Reads from GROQ_MODEL env var on Render, defaults to qwen/qwen3.6-27b
-MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 
 
 class QueryRequest(BaseModel):
@@ -197,7 +199,7 @@ Question: {query}"""
         except RateLimitError:
             return f"[{region} agent unavailable: Groq rate limit reached. Try again in a moment.]"
 
-    clients = {"EU": client_eu, "US": client_us, "UK": client_judge}
+    clients = {"EU": client_eu, "US": client_us, "UK": client_uk}
     active = [(r, clients[r]) for r in jurisdictions if r in clients]
 
     def run_staggered(region: str, client: Groq, delay: float) -> str:
