@@ -1,6 +1,5 @@
 """
-ContraRAG — Lightweight NLI Contradiction Detection Module (Option 1: API-Based, 0MB RAM)
-Calls cross-encoder/nli-deberta-v3-small via Hugging Face Serverless Inference API.
+ContraRAG — Lightweight NLI Contradiction Detection Module (API-Based)
 """
 import os
 import itertools
@@ -10,7 +9,6 @@ HF_MODEL_URLS = [
     "https://router.huggingface.co/hf-inference/models/cross-encoder/nli-deberta-v3-small",
     "https://api-inference.huggingface.co/models/cross-encoder/nli-deberta-v3-small",
 ]
-
 
 def _contradiction_score(premise: str, hypothesis: str) -> dict:
     hf_token = os.getenv("HF_TOKEN", "").strip()
@@ -24,30 +22,26 @@ def _contradiction_score(premise: str, hypothesis: str) -> dict:
     for url in HF_MODEL_URLS:
         try:
             resp = httpx.post(url, headers=headers, json=payload, timeout=20.0)
+            print(f"HF API Status: {resp.status_code}, Response: {resp.text[:200]}") # Debug log
+            
             if resp.status_code == 200:
-                scores = resp.json()
-                if scores and isinstance(scores[0], list):
-                    scores = scores[0]
-                return {s["label"].lower(): float(s["score"]) for s in scores}
+                data = resp.json()
+                if isinstance(data, list):
+                    scores = data[0] if isinstance(data[0], list) else data
+                    return {str(s.get("label", "")).lower(): float(s.get("score", 0.0)) for s in scores}
+            
             last_err = f"HTTP {resp.status_code}: {resp.text[:120]}"
         except Exception as e:
             last_err = str(e)
 
-    raise RuntimeError(f"HF Inference API error: {last_err}")
+    print(f"NLI API Error across all URLs: {last_err}")
+    return {"contradiction": 0.0}
 
 
 def check_contradiction(texts: list[str]):
-    """
-    Compare all pairs of retrieved chunks using NLI.
-    Returns:
-        contradiction_score: float 0.0-1.0 (higher = more contradiction)
-        max_pair: the most contradicting pair of texts
-        details: list of all pair scores
-    """
     if len(texts) < 2:
         return 0.0, None, []
 
-    # Compare top 5 chunks (10 pairs max) to keep API latency fast
     pairs = list(itertools.combinations(texts[:5], 2))
     details = []
     max_score = 0.0
@@ -60,7 +54,8 @@ def check_contradiction(texts: list[str]):
             if contra_score < 0.3:
                 dist2 = _contradiction_score(t2, t1)
                 contra_score = max(contra_score, dist2.get("contradiction", 0.0))
-            label = "contradiction" if contra_score > 0 else "neutral/entailment"
+            
+            label = "contradiction" if contra_score > 0.1 else "neutral/entailment"
 
             details.append({
                 "text1": t1[:100] + "...",
@@ -75,7 +70,7 @@ def check_contradiction(texts: list[str]):
                 max_pair = (t1, t2)
 
         except Exception as e:
-            print(f"NLI API warning on pair: {e}")
+            print(f"NLI pair error: {e}")
             continue
 
     return max_score, max_pair, details
