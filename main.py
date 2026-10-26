@@ -22,7 +22,7 @@ load_dotenv()
 
 app = FastAPI(title="ContraRAG API")
 
-# FIX 1: Explicitly whitelist the frontend to prevent browser CORS ghost errors
+# Explicitly whitelist the frontend to prevent browser CORS ghost errors
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -37,7 +37,7 @@ app.add_middleware(
 
 print("Loading lightweight ONNX models...")
 embed_model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2", threads=1)
-# FIX 3: Reranker disabled to prevent Render Free Tier 512MB memory crashes
+# Reranker disabled to prevent Render Free Tier 512MB memory crashes
 # reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2", threads=1)
 gc.collect()
 
@@ -303,10 +303,15 @@ def query(req: QueryRequest):
         nli_decision = "REFUSE"
 
     # --- RELEVANCE / WEAK JURISDICTION GAP CHECK ---
-    weak = [
-        j for j in req.jurisdictions 
-        if not any(c["jurisdiction"] == j and c.get("rerank_score", 0) > 0 for c in trail)
-    ]
+    # Fallback to text analysis and a higher vector threshold (0.65) since cosine scores are always > 0
+    weak = []
+    for j in req.jurisdictions:
+        resp = responses.get(j, "").lower()
+        has_low_scores = not any(c["jurisdiction"] == j and c.get("rerank_score", 0) > 0.65 for c in trail)
+        is_missing_data = "does not contain" in resp or "no information" in resp or "not mention" in resp
+        
+        if has_low_scores or is_missing_data:
+            weak.append(j)
     
     if weak:
         if nli_decision == "ANSWER":
