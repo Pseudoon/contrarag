@@ -217,9 +217,12 @@ Question: {query}"""
 
 def run_judge(query: str, context: str, responses: dict, nli_score: float, nli_decision: str, nli_contradiction_found: bool):
     judge_prompt = f"""You are ContraRAG's arbitrator. The NLI model has already determined:
-- Contradiction score: {nli_score:.2f} (0=no contradiction, 1=strong contradiction)
-- Contradiction found: {nli_contradiction_found}
-- Decision: {nli_decision}
+- Contradiction score: 
+{nli_score:.2f} (0=no contradiction, 1=strong contradiction)
+- Contradiction found: 
+{nli_contradiction_found}
+- Decision: 
+{nli_decision}
 
 Based on the agent responses below, output ONLY valid JSON with no extra text:
 {{
@@ -280,7 +283,7 @@ def query(req: QueryRequest):
 
     responses = run_agents(req.question, context, req.jurisdictions)
 
-    # --- CHANGED: Feed Regional Agent responses into NLI instead of raw PDF chunks ---
+    # --- Feed Regional Agent responses into NLI instead of raw PDF chunks ---
     agent_texts = [resp for resp in responses.values() if resp and "unavailable" not in resp]
     if len(agent_texts) < 2:
         agent_texts = [c["text"] for c in trail]  # Fallback to chunks if needed
@@ -300,9 +303,15 @@ def query(req: QueryRequest):
         j for j in req.jurisdictions 
         if not any(c["jurisdiction"] == j and c.get("rerank_score", 0) > 0 for c in trail)
     ]
-    if weak and nli_decision == "ANSWER":
-        nli_decision = "WARN"
-        nli_confidence = 0.85
+    
+    if weak:
+        if nli_decision == "ANSWER":
+            nli_decision = "WARN"
+            nli_confidence = 0.85
+            
+        # Override the neutral 0.000 score to reflect "Divergent Regulatory Scope"
+        if nli_score < 0.45:
+            nli_score = 0.45
 
     nli_contradiction_found = nli_decision != "ANSWER"
 
