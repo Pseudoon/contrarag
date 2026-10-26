@@ -280,8 +280,12 @@ def query(req: QueryRequest):
 
     responses = run_agents(req.question, context, req.jurisdictions)
 
-    chunk_texts = [c["text"] for c in trail]
-    nli_score, nli_max_pair, nli_details = check_contradiction(chunk_texts)
+    # --- CHANGED: Feed Regional Agent responses into NLI instead of raw PDF chunks ---
+    agent_texts = [resp for resp in responses.values() if resp and "unavailable" not in resp]
+    if len(agent_texts) < 2:
+        agent_texts = [c["text"] for c in trail]  # Fallback to chunks if needed
+        
+    nli_score, nli_max_pair, nli_details = check_contradiction(agent_texts)
     nli_confidence = round(1.0 - nli_score, 2)
 
     if nli_confidence > 0.75:
@@ -292,7 +296,6 @@ def query(req: QueryRequest):
         nli_decision = "REFUSE"
 
     # --- RELEVANCE / WEAK JURISDICTION GAP CHECK ---
-    # Downgrade absolute ANSWER to WARN if any queried jurisdiction returned zero relevant/positive chunks (rerank_score > 0)
     weak = [
         j for j in req.jurisdictions 
         if not any(c["jurisdiction"] == j and c.get("rerank_score", 0) > 0 for c in trail)
