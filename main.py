@@ -1,10 +1,9 @@
 """
-ContraRAG — FastAPI Backend
-Local Run: uvicorn main:app --reload --port 8000
-Render Run: uvicorn main:app --host 0.0.0.0 --port $PORT
+ContraRAG — FastAPI Backend (Option 1: Ultra-Low Memory for Render 512MB Free Tier)
 """
 
 import os
+import gc
 import json
 import time
 import re
@@ -16,14 +15,14 @@ from dotenv import load_dotenv
 from groq import Groq, RateLimitError
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-from sentence_transformers import CrossEncoder, SentenceTransformer
+from fastembed import TextEmbedding
+from fastembed.rerank.cross_encoder import TextCrossEncoder
 from nli_contradiction import check_contradiction
 
 load_dotenv()
 
 app = FastAPI(title="ContraRAG API")
 
-# Allow both localhost development and your deployed Render/Vercel frontend URLs
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,16 +31,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print("Loading models...")
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+print("Loading lightweight ONNX models...")
+embed_model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2", threads=1)
+reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2", threads=1)
+gc.collect()
+
 qdrant = QdrantClient(
     url=os.getenv("QDRANT_URL"),
     api_key=os.getenv("QDRANT_API_KEY"),
     timeout=30
 )
 
-# Dedicated Groq clients using all 4 keys from your .env file
 client_eu = Groq(api_key=os.getenv("GROQ_API_KEY_EU") or os.getenv("GROQ_API_KEY"))
 client_us = Groq(api_key=os.getenv("GROQ_API_KEY_US") or os.getenv("GROQ_API_KEY"))
 client_uk = Groq(api_key=os.getenv("GROQ_API_KEY") or os.getenv("GROQ_API_KEY_JUDGE"))
@@ -63,13 +63,11 @@ class ChatRequest(BaseModel):
 
 
 def strip_think(text: str) -> str:
-    """Remove <think>...</think> blocks from Qwen model output."""
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     return text.strip()
 
 
 def call_groq_with_retry(client: Groq, messages: list[dict], temperature: float = 0.2, max_tokens: int = 300) -> str:
-    """Wrapper to handle Groq shared organization rate limits (HTTP 429)."""
     for attempt in range(3):
         try:
             resp = client.chat.completions.create(
@@ -109,7 +107,7 @@ Return ONLY valid JSON, no extra text."""
 def search_qdrant(query: str, jurisdictions: list[str], sub_questions: list[str]):
     all_raw = []
     for sub_q in sub_questions:
-        vector = embed_model.encode(sub_q).tolist()
+        vector = list(embed_model.embed([sub_q]))[0].tolist()
         for region in jurisdictions:
             results = qdrant.query_points(
                 collection_name="ai_regulations",
@@ -138,13 +136,12 @@ def search_qdrant(query: str, jurisdictions: list[str], sub_questions: list[str]
     if not unique:
         return "", []
 
-    scores = reranker.predict([[query, c["text"]] for c in unique])
+    docs = [c["text"] for c in unique]
+    scores = list(reranker.rerank(query, docs))
     for i, c in enumerate(unique):
         c["rerank_score"] = float(scores[i])
     unique.sort(key=lambda x: x["rerank_score"], reverse=True)
 
-    # Guarantee each selected jurisdiction keeps its own best chunk(s)
-    # before filling remaining slots by global CrossEncoder rank.
     TOP_N = 5
     per_region_guarantee = 1 if len(jurisdictions) >= 3 else 2
 
@@ -170,12 +167,11 @@ def search_qdrant(query: str, jurisdictions: list[str], sub_questions: list[str]
     context = "\n\n---\n\n".join(
         [f"[{c['jurisdiction']}] {c['source']}\n{c['text'][:600]}" for c in top]
     )
+    gc.collect()
     return context, top
 
 
 def run_agents(query: str, context: str, jurisdictions: list[str]):
-    """Run one agent per selected jurisdiction, scoped to only that region's chunks."""
-
     def region_context(region: str) -> str:
         lines = [l for l in context.split("\n\n---\n\n") if l.startswith(f"[{region}]")]
         return "\n\n---\n\n".join(lines) if lines else context
@@ -288,7 +284,6 @@ def query(req: QueryRequest):
     nli_score, nli_max_pair, nli_details = check_contradiction(chunk_texts)
     nli_confidence = round(1.0 - nli_score, 2)
 
-    # Single source of truth for both the conflict badge and verdict decision
     if nli_confidence > 0.75:
         nli_decision = "ANSWER"
     elif nli_confidence > 0.4:
@@ -302,6 +297,7 @@ def query(req: QueryRequest):
         nli_score, nli_decision, nli_contradiction_found
     )
 
+    gc.collect()
     return {
         "sub_questions": sub_questions,
         "is_complex": is_complex,

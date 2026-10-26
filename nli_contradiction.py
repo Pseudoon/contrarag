@@ -1,35 +1,42 @@
 """
-ContraRAG — NLI Contradiction Detection Module
-Drop this file into your project folder.
-It is imported by app.py.
+ContraRAG — Lightweight NLI Contradiction Detection Module (Option 1: API-Based, 0MB RAM)
+Calls cross-encoder/nli-deberta-v3-small via Hugging Face Serverless Inference API.
 """
-from transformers import pipeline
+import os
 import itertools
+import httpx
 
-# Load once — this downloads ~90MB model first time
-print("Loading NLI model...")
-nli = pipeline(
-    "text-classification",
-    model="cross-encoder/nli-deberta-v3-small",
-    device=-1,  # CPU
-    top_k=None  # return scores for ALL labels (contradiction/entailment/neutral),
-                # not just the argmax — needed below.
-)
-
-def _contradiction_score(premise, hypothesis):
-    """Run NLI one direction and pull out the contradiction label's score
-    directly from the full distribution, regardless of which label wins.
-    Using nli(text, text_pair=...) — the documented call signature —
-    instead of a raw dict, since dict-style calls are version-fragile and
-    were failing silently here."""
-    scores = nli(premise[:400], text_pair=hypothesis[:400], truncation=True, max_length=512)
-    # top_k=None gives a list of {"label":..., "score":...} for one input
-    if scores and isinstance(scores[0], list):
-        scores = scores[0]
-    return {s["label"].lower(): s["score"] for s in scores}
+HF_MODEL_URLS = [
+    "https://router.huggingface.co/hf-inference/models/cross-encoder/nli-deberta-v3-small",
+    "https://api-inference.huggingface.co/models/cross-encoder/nli-deberta-v3-small",
+]
 
 
-def check_contradiction(texts):
+def _contradiction_score(premise: str, hypothesis: str) -> dict:
+    hf_token = os.getenv("HF_TOKEN", "").strip()
+    headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+    payload = {
+        "inputs": {"text": premise[:400], "text_pair": hypothesis[:400]},
+        "options": {"wait_for_model": True}
+    }
+
+    last_err = None
+    for url in HF_MODEL_URLS:
+        try:
+            resp = httpx.post(url, headers=headers, json=payload, timeout=20.0)
+            if resp.status_code == 200:
+                scores = resp.json()
+                if scores and isinstance(scores[0], list):
+                    scores = scores[0]
+                return {s["label"].lower(): float(s["score"]) for s in scores}
+            last_err = f"HTTP {resp.status_code}: {resp.text[:120]}"
+        except Exception as e:
+            last_err = str(e)
+
+    raise RuntimeError(f"HF Inference API error: {last_err}")
+
+
+def check_contradiction(texts: list[str]):
     """
     Compare all pairs of retrieved chunks using NLI.
     Returns:
@@ -40,17 +47,14 @@ def check_contradiction(texts):
     if len(texts) < 2:
         return 0.0, None, []
 
-    pairs = list(itertools.combinations(texts[:6], 2))  # max 15 pairs
+    # Compare top 5 chunks (10 pairs max) to keep API latency fast
+    pairs = list(itertools.combinations(texts[:5], 2))
     details = []
     max_score = 0.0
     max_pair = None
 
     for t1, t2 in pairs:
         try:
-            # NLI is directional; only pay for the second (reverse) pass
-            # when the first direction found nothing, instead of always
-            # running both — this was doubling NLI latency for no benefit
-            # in the common case.
             dist1 = _contradiction_score(t1, t2)
             contra_score = dist1.get("contradiction", 0.0)
             if contra_score < 0.3:
@@ -71,11 +75,7 @@ def check_contradiction(texts):
                 max_pair = (t1, t2)
 
         except Exception as e:
-            # Surfaced loudly on purpose — a silently-swallowed exception
-            # here is exactly what made every score read as 0.000 before.
-            import traceback
-            print(f"NLI ERROR on pair: {e}")
-            traceback.print_exc()
+            print(f"NLI API warning on pair: {e}")
             continue
 
     return max_score, max_pair, details
