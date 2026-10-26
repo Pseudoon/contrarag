@@ -7,7 +7,7 @@ interface Props {
 
 const DECISION_CONFIG = {
   ANSWER: {
-    label: 'COMPLIANT',
+    label: 'CONSISTENT',
     color: 'text-emerald-400',
     border: 'border-emerald-800',
     bg: 'bg-emerald-950/30',
@@ -59,7 +59,7 @@ export function VerdictPanel({ result, phase }: Props) {
   }
 
   const decision = result.verdict.decision
-  const cfg = DECISION_CONFIG[decision]
+  const cfg = DECISION_CONFIG[decision] || DECISION_CONFIG.ANSWER
   const confidence = result.verdict.confidence
   const friction = result.verdict.friction_score
 

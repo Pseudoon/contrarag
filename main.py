@@ -290,6 +290,17 @@ def query(req: QueryRequest):
         nli_decision = "WARN"
     else:
         nli_decision = "REFUSE"
+
+    # --- RELEVANCE / WEAK JURISDICTION GAP CHECK ---
+    # Downgrade absolute ANSWER to WARN if any queried jurisdiction returned zero relevant/positive chunks (rerank_score > 0)
+    weak = [
+        j for j in req.jurisdictions 
+        if not any(c["jurisdiction"] == j and c.get("rerank_score", 0) > 0 for c in trail)
+    ]
+    if weak and nli_decision == "ANSWER":
+        nli_decision = "WARN"
+        nli_confidence = 0.85
+
     nli_contradiction_found = nli_decision != "ANSWER"
 
     judge_data = run_judge(
