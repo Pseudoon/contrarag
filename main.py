@@ -16,16 +16,20 @@ from groq import Groq, RateLimitError
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from fastembed import TextEmbedding
-from fastembed.rerank.cross_encoder import TextCrossEncoder
 from nli_contradiction import check_contradiction
 
 load_dotenv()
 
 app = FastAPI(title="ContraRAG API")
 
+# FIX 1: Explicitly whitelist the frontend to prevent browser CORS ghost errors
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://contrarag-ui.onrender.com",
+        "http://localhost:5173",
+        "*"
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,7 +37,8 @@ app.add_middleware(
 
 print("Loading lightweight ONNX models...")
 embed_model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2", threads=1)
-reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2", threads=1)
+# FIX 3: Reranker disabled to prevent Render Free Tier 512MB memory crashes
+# reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2", threads=1)
 gc.collect()
 
 qdrant = QdrantClient(
@@ -136,10 +141,10 @@ def search_qdrant(query: str, jurisdictions: list[str], sub_questions: list[str]
     if not unique:
         return "", []
 
-    docs = [c["text"] for c in unique]
-    scores = list(reranker.rerank(query, docs))
-    for i, c in enumerate(unique):
-        c["rerank_score"] = float(scores[i])
+    # Map standard Qdrant score to rerank_score to bypass memory-heavy CrossEncoder
+    for c in unique:
+        c["rerank_score"] = float(c["score"])
+        
     unique.sort(key=lambda x: x["rerank_score"], reverse=True)
 
     TOP_N = 5
@@ -283,10 +288,9 @@ def query(req: QueryRequest):
 
     responses = run_agents(req.question, context, req.jurisdictions)
 
-    # --- Feed Regional Agent responses into NLI instead of raw PDF chunks ---
     agent_texts = [resp for resp in responses.values() if resp and "unavailable" not in resp]
     if len(agent_texts) < 2:
-        agent_texts = [c["text"] for c in trail]  # Fallback to chunks if needed
+        agent_texts = [c["text"] for c in trail]
         
     nli_score, nli_max_pair, nli_details = check_contradiction(agent_texts)
     nli_confidence = round(1.0 - nli_score, 2)
